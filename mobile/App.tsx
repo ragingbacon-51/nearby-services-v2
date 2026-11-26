@@ -1,7 +1,8 @@
 import { StatusBar } from 'expo-status-bar';
 import * as Location from 'expo-location';
+import * as SecureStore from 'expo-secure-store';
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Linking, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Linking, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
 type Role = 'customer' | 'provider';
 type Category = { id: number; name: string };
@@ -10,27 +11,53 @@ type Profile = { name: string; role: Role; phone: string; phone_verified: boolea
 type Offering = { id: number; category: number; category_name: string; pricing: 'fixed' | 'quote';
   price_kes: string | null; active: boolean; profession_verified: boolean };
 type NearbyOffering = { id: number; provider_name: string; category_name: string; description: string;
-  pricing: 'fixed' | 'quote'; price_kes: string | null; distance_km: number };
+  pricing: 'fixed' | 'quote'; price_kes: string | null; distance_km: number;
+  average_rating: number | null; review_count: number };
+type Review = { rating: number; comment: string; created_at: string };
+type BookingMessage = { id: number; sender_name: string; is_mine: boolean; body: string; created_at: string };
+type AppNotification = { id: number; booking_id: number | null; kind: string; message: string;
+  created_at: string; read_at: string | null };
 type Booking = { id: number; customer_name: string; provider_name: string; category_name: string;
   details: string; address: string; scheduled_for: string; pricing: 'fixed' | 'quote';
-  price_kes: string | null; status: string };
+  price_kes: string | null; status: string; contact_phone: string | null; review: Review | null; sandbox_payment: {
+    status: string; amount_kes: number; commission_kes: string; provider_share_kes: string;
+  } | null };
 
-const API = (process.env.EXPO_PUBLIC_API_URL || 'http://127.0.0.1:8000/api').replace(/\/$/, '');
+const isWeb = Platform.OS === 'web';
+const API = (process.env.EXPO_PUBLIC_API_URL || `http://${isWeb ? 'localhost' : '127.0.0.1'}:8000/api`).replace(/\/$/, '');
+const sessionKey = 'nearby-services-token';
+let csrfToken = '';
+
+class ApiError extends Error {
+  constructor(message: string, public status: number) { super(message); }
+}
+
+async function refreshCsrf() {
+  const response = await fetch(`${API}/session/csrf/`, { credentials: 'include' });
+  if (!response.ok) throw new Error('Unable to prepare the browser session.');
+  const data: { csrf_token: string } = await response.json();
+  csrfToken = data.csrf_token;
+}
 
 async function call<T>(path: string, token: string | null, method = 'GET', body?: object): Promise<T> {
   let response: Response;
   try {
     response = await fetch(`${API}${path}`, {
-      method, headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Token ${token}` } : {}) },
+      method, headers: { 'Content-Type': 'application/json', ...(!isWeb && token ? { Authorization: `Token ${token}` } : {}),
+        ...(isWeb && method !== 'GET' ? { 'X-CSRFToken': csrfToken } : {}) },
+      ...(isWeb ? { credentials: 'include' as const } : {}),
       ...(body ? { body: JSON.stringify(body) } : {}),
     });
   } catch {
     throw new Error('Cannot reach the server. Check your connection and API address.');
   }
   if (response.status === 204) return undefined as T;
+  if (!response.headers.get('content-type')?.includes('application/json')) {
+    throw new ApiError(`The server returned an unexpected response (${response.status}).`, response.status);
+  }
   const data = await response.json();
   if (!response.ok) {
-    throw new Error(data.detail || Object.entries(data).map(([field, value]) => `${field}: ${value}`).join('\n'));
+    throw new ApiError(data.detail || Object.entries(data).map(([field, value]) => `${field}: ${value}`).join('\n'), response.status);
   }
   return data as T;
 }
@@ -73,7 +100,7 @@ export default function App() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [category, setCategory] = useState<number | null>(null);
   const [mode, setMode] = useState<'login' | 'register'>('login');
-  const [tab, setTab] = useState<'discover' | 'bookings' | 'account'>('discover');
+  const [tab, setTab] = useState<'discover' | 'bookings' | 'notifications' | 'account'>('discover');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [firstName, setFirstName] = useState('');
@@ -85,6 +112,9 @@ export default function App() {
   const [pricing, setPricing] = useState<'fixed' | 'quote'>('quote');
   const [price, setPrice] = useState('');
   const [offerings, setOfferings] = useState<Offering[]>([]);
+  const [editingOffering, setEditingOffering] = useState<number | null>(null);
+  const [editPricing, setEditPricing] = useState<'fixed' | 'quote'>('quote');
+  const [editPrice, setEditPrice] = useState('');
   const [results, setResults] = useState<NearbyOffering[]>([]);
   const [searched, setSearched] = useState(false);
   const [selected, setSelected] = useState<NearbyOffering | null>(null);
@@ -92,10 +122,21 @@ export default function App() {
   const [address, setAddress] = useState('');
   const [when, setWhen] = useState('');
   const [bookings, setBookings] = useState<Booking[]>([]);
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  const [openChatBookingId, setOpenChatBookingId] = useState<number | null>(null);
+  const [chatMessages, setChatMessages] = useState<BookingMessage[]>([]);
+  const [chatDraft, setChatDraft] = useState('');
+  const [reviewRatings, setReviewRatings] = useState<Record<number, number>>({});
+  const [reviewComments, setReviewComments] = useState<Record<number, string>>({});
+  const [openReviewsOfferingId, setOpenReviewsOfferingId] = useState<number | null>(null);
+  const [providerReviews, setProviderReviews] = useState<Review[]>([]);
   const [quotes, setQuotes] = useState<Record<number, string>>({});
+  const [testPhones, setTestPhones] = useState<Record<number, string>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
+  const [restoring, setRestoring] = useState(true);
+  const [restoreError, setRestoreError] = useState('');
 
   async function run(action: () => Promise<void>) {
     setError(''); setMessage(''); setBusy(true);
@@ -107,17 +148,50 @@ export default function App() {
     const data = await call<Category[]>('/categories/', null);
     setCategories(data); setCategory(previous => data.some(item => item.id === previous) ? previous : data[0]?.id ?? null);
   }
-  useEffect(() => { void run(loadCategories); }, []);
+  async function restoreSession() {
+    setRestoring(true); setRestoreError('');
+    try {
+      if (isWeb) await refreshCsrf();
+      const savedToken = isWeb ? 'session' : await SecureStore.getItemAsync(sessionKey);
+      if (savedToken) {
+        let savedProfile: Profile | null = null;
+        try {
+          savedProfile = await call<Profile>('/profile/', savedToken);
+        } catch (err) {
+          if (!(err instanceof ApiError) || ![401, 403].includes(err.status)) throw err;
+          if (!isWeb) await SecureStore.deleteItemAsync(sessionKey);
+          setToken(null); setProfile(null);
+        }
+        if (savedProfile) {
+          if (savedProfile.role === 'provider') setOfferings(await call<Offering[]>('/offerings/', savedToken));
+          setToken(savedToken); setProfile(savedProfile); setDescription(savedProfile.description);
+          setTab(savedProfile.role === 'provider' ? 'account' : 'discover');
+          await loadNotifications(savedToken);
+        }
+      }
+      await loadCategories();
+    } catch (err) {
+      setRestoreError(err instanceof Error ? err.message : 'Could not restore the session.');
+    } finally { setRestoring(false); }
+  }
+  useEffect(() => { void restoreSession(); }, []);
 
   async function authenticate() {
     const data = mode === 'login' ? { username, password } : {
       username, password, first_name: firstName, last_name: lastName, phone, role,
     };
-    const result = await call<{ token: string; profile: Profile }>(mode === 'login' ? '/login/' : '/register/', null, 'POST', data);
-    setToken(result.token); setProfile(result.profile); setDescription(result.profile.description);
+    const path = mode === 'login' ? '/login/' : '/register/';
+    if (isWeb) await refreshCsrf();
+    const result = await call<{ token?: string; profile: Profile }>(isWeb ? `/session${path}` : path, null, 'POST', data);
+    const newToken = isWeb ? 'session' : result.token;
+    if (!newToken) throw new Error('The server did not return a sign-in token.');
+    if (isWeb) await refreshCsrf();
+    else await SecureStore.setItemAsync(sessionKey, newToken);
+    setToken(newToken); setProfile(result.profile); setDescription(result.profile.description);
     setPassword(''); setTab(result.profile.role === 'provider' ? 'account' : 'discover');
     await loadCategories();
-    if (result.profile.role === 'provider') setOfferings(await call<Offering[]>('/offerings/', result.token));
+    if (result.profile.role === 'provider') setOfferings(await call<Offering[]>('/offerings/', newToken));
+    await loadNotifications(newToken);
   }
   async function loadAccount() {
     const result = await call<Profile>('/profile/', token);
@@ -125,6 +199,16 @@ export default function App() {
     if (result.role === 'provider') setOfferings(await call<Offering[]>('/offerings/', token));
   }
   async function loadBookings() { setBookings(await call<Booking[]>('/bookings/', token)); }
+  async function loadNotifications(authToken = token) {
+    setNotifications(await call<AppNotification[]>('/notifications/', authToken));
+  }
+  async function loadChat(bookingId: number) {
+    setChatMessages(await call<BookingMessage[]>(`/bookings/${bookingId}/messages/`, token));
+  }
+  async function loadProviderReviews(offeringId: number) {
+    const response = await call<{ reviews: Review[] }>(`/offerings/${offeringId}/reviews/`, null);
+    setProviderReviews(response.reviews);
+  }
   async function search() {
     if (category === null) throw new Error('Choose a service category first.');
     const location = await currentLocation();
@@ -140,12 +224,57 @@ export default function App() {
     await call('/bookings/', token, 'POST', { offering_id: selected.id, details, address,
       scheduled_for: date.toISOString(), ...(selected.pricing === 'fixed' ? { accepted_fixed_price_kes: selected.price_kes } : {}) });
     setSelected(null); setDetails(''); setAddress(''); setWhen(''); setTab('bookings');
-    await loadBookings(); setMessage('Booking request sent.');
+    await loadBookings(); await loadNotifications(); setMessage('Booking request sent.');
   }
   async function action(id: number, name: string) {
     await call(`/bookings/${id}/action/`, token, 'POST', { action: name,
       ...(name === 'quote' ? { price_kes: quotes[id] || '' } : {}) });
-    await loadBookings(); setMessage('Booking updated.');
+    await loadBookings(); await loadNotifications(); setMessage('Booking updated.');
+  }
+  async function toggleChat(bookingId: number) {
+    if (openChatBookingId === bookingId) {
+      setOpenChatBookingId(null); setChatDraft(''); return;
+    }
+    setOpenChatBookingId(bookingId); setChatDraft(''); setChatMessages([]);
+    await loadChat(bookingId);
+  }
+  async function sendChat(bookingId: number) {
+    if (!chatDraft.trim()) throw new Error('Enter a message first.');
+    await call(`/bookings/${bookingId}/messages/`, token, 'POST', { body: chatDraft });
+    setChatDraft('');
+    await loadChat(bookingId); await loadNotifications();
+  }
+  async function submitReview(bookingId: number) {
+    await call(`/bookings/${bookingId}/review/`, token, 'POST', {
+      rating: reviewRatings[bookingId] || 5, comment: reviewComments[bookingId] || '',
+    });
+    await loadBookings(); await loadNotifications();
+    setMessage('Thanks for reviewing this service.');
+  }
+  async function markNotificationRead(notificationId: number) {
+    await call(`/notifications/${notificationId}/read/`, token, 'POST');
+    await loadNotifications();
+  }
+  function clearLocalSession() {
+    setToken(null); setProfile(null); setBookings([]); setResults([]); setOfferings([]); setSelected(null);
+    setNotifications([]); setChatMessages([]); setChatDraft(''); setOpenChatBookingId(null);
+    setProviderReviews([]); setOpenReviewsOfferingId(null); setQuotes({}); setTestPhones({});
+    setReviewRatings({}); setReviewComments({}); setDetails(''); setAddress(''); setWhen('');
+    setDescription(''); setEditingOffering(null); setSearched(false);
+  }
+  async function signOut() {
+    if (isWeb) {
+      await call('/session/logout/', token, 'POST');
+      clearLocalSession();
+      await refreshCsrf();
+      return;
+    }
+    try {
+      await call('/logout/', token, 'POST');
+    } finally {
+      clearLocalSession();
+      await SecureStore.deleteItemAsync(sessionKey);
+    }
   }
 
   return <View style={styles.root}><StatusBar style="dark" />
@@ -156,7 +285,10 @@ export default function App() {
       {busy && <ActivityIndicator color="#087e75" style={styles.loader} />}
       {!!error && <Text accessibilityRole="alert" style={styles.error}>{error}</Text>}
       {!!message && <Text style={styles.notice}>{message}</Text>}
-      {!profile || !token ? <View style={styles.card}>
+      {restoring ? <Text style={styles.muted}>Restoring your session...</Text> : restoreError ? <View style={styles.card}>
+        <Text accessibilityRole="alert" style={styles.error}>{restoreError}</Text>
+        <Button title="Retry" onPress={() => void restoreSession()} />
+      </View> : !profile || !token ? <View style={styles.card}>
         <Text style={styles.heading}>{mode === 'login' ? 'Welcome back' : 'Create your account'}</Text>
         {mode === 'register' && <>
           <Text style={styles.label}>Account type</Text><View style={styles.row}>
@@ -176,8 +308,26 @@ export default function App() {
         <View style={styles.row}>
           {profile.role === 'customer' && <Choice title="Discover" selected={tab === 'discover'} onPress={() => setTab('discover')} />}
           <Choice title="Bookings" selected={tab === 'bookings'} onPress={() => void run(async () => { setTab('bookings'); await loadBookings(); })} />
+          <Choice title={`Inbox${notifications.some(item => !item.read_at) ? ` (${notifications.filter(item => !item.read_at).length})` : ''}`}
+            selected={tab === 'notifications'} onPress={() => void run(async () => {
+              setTab('notifications'); await loadNotifications();
+            })} />
           <Choice title="Account" selected={tab === 'account'} onPress={() => void run(async () => { setTab('account'); await loadAccount(); })} />
         </View>
+        {tab === 'notifications' && <View style={styles.card}>
+          <Text style={styles.heading}>Notifications</Text>
+          <Button title="Refresh inbox" secondary disabled={busy} onPress={() => void run(loadNotifications)} />
+          {notifications.length === 0 && <Text style={styles.muted}>No notifications yet.</Text>}
+          {notifications.map(item => <View key={item.id} style={styles.item}>
+            <Text style={styles.body}>{item.message}</Text>
+            <Text style={styles.muted}>{new Date(item.created_at).toLocaleString()}</Text>
+            {!item.read_at && <Button title="Mark as read" secondary disabled={busy}
+              onPress={() => void run(() => markNotificationRead(item.id))} />}
+            {item.booking_id !== null && <Button title="Open booking" secondary disabled={busy} onPress={() => void run(async () => {
+              setTab('bookings'); await loadBookings();
+            })} />}
+          </View>)}
+        </View>}
         {tab === 'discover' && profile.role === 'customer' && <View style={styles.card}>
           <Text style={styles.heading}>Explore services</Text>
           <Text style={styles.muted}>Find providers within 20 km of your location.</Text>
@@ -188,6 +338,24 @@ export default function App() {
           {results.map(item => <View key={item.id} style={styles.item}>
             <Text style={styles.itemTitle}>{item.provider_name}</Text>
             <Text style={styles.muted}>{item.category_name} · approximately {item.distance_km} km away</Text>
+            <Text style={styles.muted}>{item.review_count
+              ? `${item.average_rating} / 5 from ${item.review_count} review${item.review_count === 1 ? '' : 's'}`
+              : 'No reviews yet'}</Text>
+            {item.review_count > 0 && <Button title={openReviewsOfferingId === item.id ? 'Hide reviews' : 'Read reviews'}
+              secondary onPress={() => void run(async () => {
+                if (openReviewsOfferingId === item.id) setOpenReviewsOfferingId(null);
+                else {
+                  setOpenReviewsOfferingId(item.id);
+                  setProviderReviews([]);
+                  await loadProviderReviews(item.id);
+                }
+              })} />}
+            {openReviewsOfferingId === item.id && providerReviews.map((review, index) =>
+              <View key={`${review.created_at}-${index}`} style={styles.review}>
+                <Text style={styles.body}>{'★'.repeat(review.rating)}{'☆'.repeat(5 - review.rating)}</Text>
+                {!!review.comment && <Text style={styles.body}>{review.comment}</Text>}
+                <Text style={styles.muted}>{new Date(review.created_at).toLocaleDateString()}</Text>
+              </View>)}
             {!!item.description && <Text style={styles.body}>{item.description}</Text>}
             <Text style={styles.body}>{item.pricing === 'fixed' ? `Fixed price: KSh ${item.price_kes}` : 'Price on request'}</Text>
             <Text style={styles.badge}>Phone, identity and profession checked</Text>
@@ -195,7 +363,7 @@ export default function App() {
           </View>)}
           {selected && <View style={styles.item}>
             <Text style={styles.itemTitle}>Book {selected.provider_name}</Text>
-            <Text style={styles.muted}>Your details, address and requested time will be shared with the provider.</Text>
+            <Text style={styles.muted}>Your details, address and requested time will be shared with the provider. Once the booking is confirmed, your verified phone numbers will be shared with each other.</Text>
             {selected.pricing === 'fixed' && <Text style={styles.body}>By sending, you accept the fixed price of KSh {selected.price_kes}.</Text>}
             <Field label="Describe the job" value={details} onChangeText={setDetails} multiline />
             <Field label="Service address" value={address} onChangeText={setAddress} />
@@ -206,14 +374,35 @@ export default function App() {
         </View>}
         {tab === 'bookings' && <View style={styles.card}>
           <Text style={styles.heading}>Bookings</Text>
-          <Text style={styles.muted}>Payment will be due after you confirm the work is done. M-Pesa is not connected yet.</Text>
+          <Text style={styles.muted}>Payment is due after you confirm the work is done. Sandbox checkout is for testing only; no real payments or payouts are available.</Text>
           {bookings.length === 0 && <Text style={styles.muted}>No bookings yet.</Text>}
           {bookings.map(item => <View key={item.id} style={styles.item}>
             <Text style={styles.itemTitle}>{item.category_name} · {profile.role === 'customer' ? item.provider_name : item.customer_name}</Text>
             <Text style={styles.badge}>{item.status.replace(/_/g, ' ')}</Text>
             <Text style={styles.body}>{item.details}</Text>
             <Text style={styles.muted}>{item.address} · {new Date(item.scheduled_for).toLocaleString()}</Text>
+            {item.contact_phone && <Button title={`Call ${item.contact_phone}`} secondary onPress={() => void run(async () => {
+              await Linking.openURL(`tel:${item.contact_phone}`);
+            })} />}
             {item.price_kes && <Text style={styles.body}>Service price: KSh {item.price_kes}</Text>}
+            {item.status !== 'declined' && item.status !== 'closed_no_payment' && <>
+              <Button title={openChatBookingId === item.id ? 'Close chat' : 'Message about booking'}
+                secondary disabled={busy} onPress={() => void run(() => toggleChat(item.id))} />
+              {openChatBookingId === item.id && <View style={styles.chat}>
+                <Text style={styles.muted}>Messages are visible only to the customer and provider on this booking.</Text>
+                <Button title="Refresh messages" secondary disabled={busy}
+                  onPress={() => void run(() => loadChat(item.id))} />
+                {chatMessages.map(chatMessage => <View key={chatMessage.id} style={styles.message}>
+                  <Text style={styles.badge}>{chatMessage.is_mine ? 'You' : chatMessage.sender_name}</Text>
+                  <Text style={styles.body}>{chatMessage.body}</Text>
+                  <Text style={styles.muted}>{new Date(chatMessage.created_at).toLocaleString()}</Text>
+                </View>)}
+                <Field label="Message" value={chatDraft} onChangeText={setChatDraft} multiline />
+                <Button title="Send message" disabled={busy} onPress={() => void run(() => sendChat(item.id))} />
+              </View>}
+            </>}
+            {(item.status === 'pending' || item.status === 'quoted') &&
+              <Text style={styles.muted}>When both parties confirm, your verified phone numbers will be shared with each other.</Text>}
             {profile.role === 'provider' && item.status === 'pending' && item.pricing === 'quote' && <>
               <Field label="Your quote (KSh)" value={quotes[item.id] || ''} onChangeText={value => setQuotes({ ...quotes, [item.id]: value })} />
               <Button title="Send quote" disabled={busy} onPress={() => void run(() => action(item.id, 'quote'))} />
@@ -230,7 +419,45 @@ export default function App() {
               <Button title="Confirm job completed" disabled={busy} onPress={() => void run(() => action(item.id, 'confirm_completion'))} />
               <Button title="Raise a dispute" secondary disabled={busy} onPress={() => void run(() => action(item.id, 'dispute'))} />
             </>}
-            {item.status === 'payment_due' && <Text style={styles.muted}>Payment is due, but online payment is not available in this prototype.</Text>}
+            {item.review && <View style={styles.review}>
+              <Text style={styles.body}>{'★'.repeat(item.review.rating)}{'☆'.repeat(5 - item.review.rating)} · Customer review</Text>
+              {!!item.review.comment && <Text style={styles.body}>{item.review.comment}</Text>}
+            </View>}
+            {profile.role === 'customer' && item.status === 'payment_due' && !item.review && <View style={styles.review}>
+              <Text style={styles.itemTitle}>Review this service</Text>
+              <View style={styles.row}>{[1, 2, 3, 4, 5].map(rating =>
+                <Choice key={rating} title={`${rating} star${rating === 1 ? '' : 's'}`}
+                  selected={(reviewRatings[item.id] || 5) === rating}
+                  onPress={() => setReviewRatings({ ...reviewRatings, [item.id]: rating })} />)}</View>
+              <Field label="Optional comment" value={reviewComments[item.id] || ''}
+                onChangeText={value => setReviewComments({ ...reviewComments, [item.id]: value })} multiline />
+              <Button title="Submit review" disabled={busy} onPress={() => void run(() => submitReview(item.id))} />
+            </View>}
+            {item.status === 'payment_due' && profile.role === 'customer' && <View>
+              <Text style={styles.itemTitle}>M-Pesa sandbox test only</Text>
+              <Text style={styles.muted}>Test fee: KSh 0. No real payment or payout is made. The 5% commission is calculated from the service price.</Text>
+              {!item.sandbox_payment ? <>
+                <Field label="Safaricom sandbox test number (254...)" value={testPhones[item.id] || ''}
+                  onChangeText={value => setTestPhones({ ...testPhones, [item.id]: value })} />
+                <Button title="Start sandbox checkout" disabled={busy} onPress={() => void run(async () => {
+                  try {
+                    await call(`/bookings/${item.id}/sandbox-payment/`, token, 'POST', { phone: testPhones[item.id] || '' });
+                  } finally {
+                    await loadBookings();
+                  }
+                  setMessage('Sandbox checkout requested. Check its status after completing the test.');
+                })} />
+              </> : <>
+                <Text style={styles.body}>Test status: {item.sandbox_payment.status.replace(/_/g, ' ')}</Text>
+                <Text style={styles.muted}>Test commission: KSh {item.sandbox_payment.commission_kes} · Provider share: KSh {item.sandbox_payment.provider_share_kes}</Text>
+                {(item.sandbox_payment.status === 'pending' || item.sandbox_payment.status === 'unknown') &&
+                  <Button title="Refresh sandbox status" secondary disabled={busy} onPress={() => void run(async () => {
+                    await call(`/bookings/${item.id}/sandbox-payment/status/`, token, 'POST'); await loadBookings();
+                  })} />}
+                {(item.sandbox_payment.status === 'unknown' || item.sandbox_payment.status === 'submitting') &&
+                  <Text style={styles.muted}>Do not retry checkout. The attempt may need investigation in Daraja.</Text>}
+              </>}
+            </View>}
             {item.status === 'disputed' && <Text style={styles.muted}>Payment is paused for administrator review.</Text>}
           </View>)}
         </View>}
@@ -278,6 +505,21 @@ export default function App() {
               {offerings.map(item => <View key={item.id} style={styles.offering}>
                 <Text style={styles.body}>{item.category_name} · {item.pricing === 'fixed' ? `KSh ${item.price_kes}` : 'Quote'}</Text>
                 <Text style={styles.muted}>{item.profession_verified ? 'Profession approved' : 'Awaiting profession review'} · {item.active ? 'Active' : 'Disabled'}</Text>
+                {editingOffering === item.id ? <>
+                  <View style={styles.row}>{(['quote', 'fixed'] as const).map(value =>
+                    <Choice key={value} title={value === 'fixed' ? 'Fixed price' : 'Quote'} selected={editPricing === value}
+                      onPress={() => setEditPricing(value)} />)}</View>
+                  {editPricing === 'fixed' && <Field label="Fixed price (KSh)" value={editPrice} onChangeText={setEditPrice} />}
+                  <Button title="Save pricing" disabled={busy} onPress={() => void run(async () => {
+                    await call(`/offerings/${item.id}/`, token, 'PATCH', {
+                      pricing: editPricing, price_kes: editPricing === 'fixed' ? editPrice : null,
+                    });
+                    setEditingOffering(null); await loadAccount(); setMessage('Pricing updated for future bookings.');
+                  })} />
+                  <Button title="Cancel" secondary disabled={busy} onPress={() => setEditingOffering(null)} />
+                </> : <Button title="Edit pricing" secondary disabled={busy} onPress={() => {
+                  setEditingOffering(item.id); setEditPricing(item.pricing); setEditPrice(item.price_kes || '');
+                }} />}
                 <Button title={item.active ? 'Disable service' : 'Enable service'} secondary disabled={busy}
                   onPress={() => void run(async () => {
                     await call(`/offerings/${item.id}/`, token, 'PATCH', { active: !item.active }); await loadAccount();
@@ -296,9 +538,7 @@ export default function App() {
               })} />
             </View>
           </>}
-          <Button title="Sign out" secondary disabled={busy} onPress={() => void run(async () => {
-            await call('/logout/', token, 'POST'); setToken(null); setProfile(null); setBookings([]); setResults([]);
-          })} />
+          <Button title="Sign out" secondary disabled={busy} onPress={() => void run(signOut)} />
         </View>}
       </>}
       <Text style={styles.footer}>Verification is not a guarantee of safety.</Text>
@@ -333,6 +573,9 @@ const styles = StyleSheet.create({
   chipTextSelected: { color: '#fff', fontWeight: '700' },
   item: { borderTopWidth: 1, borderColor: '#e4eeeb', paddingTop: 16, marginTop: 16 },
   offering: { borderBottomWidth: 1, borderColor: '#e4eeeb', paddingBottom: 12 },
+  review: { backgroundColor: '#f5faf8', borderRadius: 10, padding: 12, marginTop: 12 },
+  chat: { backgroundColor: '#f5faf8', borderRadius: 10, padding: 12, marginTop: 8 },
+  message: { borderBottomWidth: 1, borderColor: '#e4eeeb', paddingVertical: 8 },
   badge: { color: '#087e75', fontWeight: '700', fontSize: 12, marginTop: 5, textTransform: 'capitalize' },
   error: { color: '#8a2929', backgroundColor: '#fdecec', padding: 14, borderRadius: 10, marginBottom: 12 },
   notice: { color: '#155e54', backgroundColor: '#dbf3e8', padding: 14, borderRadius: 10, marginBottom: 12 },

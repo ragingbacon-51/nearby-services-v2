@@ -2,6 +2,10 @@ from django.urls import path
 from . import views
 
 urlpatterns = [
+    path("session/csrf/", views.session_csrf),
+    path("session/register/", views.session_register),
+    path("session/login/", views.session_login),
+    path("session/logout/", views.session_logout),
     path("register/", views.register),
     path("login/", views.login),
     path("logout/", views.logout),
@@ -9,9 +13,17 @@ urlpatterns = [
     path("categories/", views.categories),
     path("offerings/", views.offerings),
     path("offerings/<int:offering_id>/", views.offering_detail),
+    path("offerings/<int:offering_id>/reviews/", views.offering_reviews),
     path("nearby/", views.nearby),
     path("bookings/", views.bookings),
     path("bookings/<int:booking_id>/action/", views.booking_action),
+    path("bookings/<int:booking_id>/messages/", views.booking_messages),
+    path("bookings/<int:booking_id>/review/", views.booking_review),
+    path("notifications/", views.notifications),
+    path("notifications/<int:notification_id>/read/", views.notification_read),
+    path("bookings/<int:booking_id>/sandbox-payment/", views.sandbox_payment),
+    path("bookings/<int:booking_id>/sandbox-payment/status/", views.sandbox_payment_status),
+    path("payments/mpesa/callback/", views.mpesa_callback),
     path("verify/phone/start/", views.phone_start),
     path("verify/phone/check/", views.phone_check),
     path("verify/identity/start/", views.identity_start),

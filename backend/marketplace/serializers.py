@@ -3,7 +3,7 @@ from django.contrib.auth import get_user_model, password_validation
 from django.db import transaction
 from django.utils import timezone
 from rest_framework import serializers
-from .models import Booking, Category, Offering, Profile
+from .models import Booking, BookingMessage, Category, InAppNotification, Offering, Profile, Review
 
 User = get_user_model()
 
@@ -98,13 +98,80 @@ class BookingSerializer(serializers.ModelSerializer):
     customer_name = serializers.CharField(source="customer.get_full_name", read_only=True)
     provider_name = serializers.CharField(source="offering.provider.user.get_full_name", read_only=True)
     category_name = serializers.CharField(source="offering.category.name", read_only=True)
+    sandbox_payment = serializers.SerializerMethodField()
+    contact_phone = serializers.SerializerMethodField()
+    review = serializers.SerializerMethodField()
 
     class Meta:
         model = Booking
         fields = ("id", "customer_name", "provider_name", "category_name", "details", "address",
-                  "scheduled_for", "pricing", "price_kes", "status", "created_at")
+                  "scheduled_for", "pricing", "price_kes", "status", "created_at", "sandbox_payment",
+                  "contact_phone", "review")
         read_only_fields = fields
+
+    def get_contact_phone(self, obj):
+        request = self.context.get("request")
+        if not request or obj.status not in (
+            Booking.Status.CONFIRMED, Booking.Status.COMPLETED, Booking.Status.PAYMENT_DUE,
+            Booking.Status.DISPUTED, Booking.Status.CLOSED_NO_PAYMENT,
+        ):
+            return None
+        if request.user.pk == obj.customer_id:
+            profile = obj.offering.provider
+        elif request.user.pk == obj.offering.provider.user_id:
+            profile = obj.customer.profile
+        else:
+            return None
+        return profile.phone if profile.phone_verified else None
+
+    def get_sandbox_payment(self, obj):
+        payment = getattr(obj, "sandbox_payment", None)
+        if payment is None:
+            return None
+        return {"status": payment.status, "amount_kes": payment.amount_kes,
+                "commission_kes": str(payment.commission_kes), "provider_share_kes": str(payment.provider_share_kes)}
+
+    def get_review(self, obj):
+        review = getattr(obj, "review", None)
+        if review is None:
+            return None
+        return {"rating": review.rating, "comment": review.comment, "created_at": review.created_at}
 
 
 class QuoteSerializer(serializers.Serializer):
     price_kes = serializers.DecimalField(max_digits=10, decimal_places=2, min_value=Decimal("1"))
+
+
+class BookingMessageSerializer(serializers.ModelSerializer):
+    sender_name = serializers.CharField(source="sender.get_full_name", read_only=True)
+    is_mine = serializers.SerializerMethodField()
+
+    class Meta:
+        model = BookingMessage
+        fields = ("id", "sender_name", "is_mine", "body", "created_at")
+        read_only_fields = fields
+
+    def get_is_mine(self, obj):
+        request = self.context.get("request")
+        return bool(request and request.user.pk == obj.sender_id)
+
+
+class MessageCreateSerializer(serializers.Serializer):
+    body = serializers.CharField(max_length=2000, trim_whitespace=True)
+
+
+class ReviewSerializer(serializers.ModelSerializer):
+    rating = serializers.IntegerField(min_value=1, max_value=5)
+    comment = serializers.CharField(max_length=1000, allow_blank=True, required=False)
+
+    class Meta:
+        model = Review
+        fields = ("rating", "comment", "created_at")
+        read_only_fields = ("created_at",)
+
+
+class InAppNotificationSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = InAppNotification
+        fields = ("id", "booking_id", "kind", "message", "created_at", "read_at")
+        read_only_fields = fields

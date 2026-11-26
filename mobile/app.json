@@ -7,9 +7,13 @@
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "plugins": [
-      ["expo-location", {
-        "locationWhenInUsePermission": "Allow Nearby Services to find local providers or set your service location."
-      }]
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Allow Nearby Services to find local providers or set your service location."
+        }
+      ],
+      "expo-secure-store"
     ],
     "ios": {
       "supportsTablet": true
