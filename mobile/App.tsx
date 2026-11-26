@@ -27,6 +27,28 @@ const isWeb = Platform.OS === 'web';
 const API = (process.env.EXPO_PUBLIC_API_URL || `http://${isWeb ? 'localhost' : '127.0.0.1'}:8000/api`).replace(/\/$/, '');
 const sessionKey = 'nearby-services-token';
 let csrfToken = '';
+const privacySections = [
+  {
+    title: 'Information handled',
+    body: 'We handle your name, username, phone number, password hash, provider profile and service location, booking address and details, chat messages, reviews, verification status, and in-app notifications. Customer location is sent for nearby searches and is not saved to your profile by the search.',
+  },
+  {
+    title: 'How information is used and shared',
+    body: 'Information supports accounts, verification, search, bookings, chat, reviews, and notifications. Booking participants see booking details; verified phone numbers are shared only after confirmation. Review ratings and comments are public and do not show your name. Phone verification uses eSMS Africa; identity checks use Didit; optional M-Pesa sandbox tests use Safaricom sandbox.',
+  },
+  {
+    title: 'Storage and retention',
+    body: 'This prototype uses a local SQLite database and has no automatic retention schedule or self-service deletion. Data remains until the operator removes it. Request access, correction, or deletion at [privacy contact email]. Replace this placeholder and confirm retention before launch.',
+  },
+  {
+    title: 'Uploads, subscriptions, and trials',
+    body: 'The app has no file-upload feature or public storage bucket. Identity documents are handled in Didit’s hosted flow, not uploaded to this app. There are no subscriptions, free trials, or trial reminders.',
+  },
+  {
+    title: 'Chat and safety',
+    body: 'Booking chat is peer-to-peer, not an AI assistant or emergency service, and is not monitored for emergencies. If you or someone else is in immediate danger, contact local emergency services or a trusted person.',
+  },
+] as const;
 
 class ApiError extends Error {
   constructor(message: string, public status: number) { super(message); }
@@ -137,6 +159,7 @@ export default function App() {
   const [message, setMessage] = useState('');
   const [restoring, setRestoring] = useState(true);
   const [restoreError, setRestoreError] = useState('');
+  const [privacyVisible, setPrivacyVisible] = useState(false);
 
   async function run(action: () => Promise<void>) {
     setError(''); setMessage(''); setBusy(true);
@@ -285,12 +308,24 @@ export default function App() {
       {busy && <ActivityIndicator color="#087e75" style={styles.loader} />}
       {!!error && <Text accessibilityRole="alert" style={styles.error}>{error}</Text>}
       {!!message && <Text style={styles.notice}>{message}</Text>}
-      {restoring ? <Text style={styles.muted}>Restoring your session...</Text> : restoreError ? <View style={styles.card}>
+        {privacyVisible ? <View style={styles.card}>
+          <Text style={styles.heading}>Privacy policy</Text>
+          <Text style={styles.error}>Prototype draft. Replace [privacy contact email] and have this policy reviewed before public launch.</Text>
+          {privacySections.map(section => <View key={section.title} style={styles.privacySection}>
+            <Text style={styles.itemTitle}>{section.title}</Text>
+            <Text style={styles.body}>{section.body}</Text>
+          </View>)}
+          <Button title="Back" secondary onPress={() => setPrivacyVisible(false)} />
+        </View> : restoring ? <Text style={styles.muted}>Restoring your session...</Text> : restoreError ? <View style={styles.card}>
         <Text accessibilityRole="alert" style={styles.error}>{restoreError}</Text>
         <Button title="Retry" onPress={() => void restoreSession()} />
       </View> : !profile || !token ? <View style={styles.card}>
         <Text style={styles.heading}>{mode === 'login' ? 'Welcome back' : 'Create your account'}</Text>
         {mode === 'register' && <>
+            <Text style={styles.privacySummary}>
+              We collect account and phone details; providers also supply a service location. Bookings include service addresses and job details. We use verification providers, booking chat and reviews, and do not offer uploads, subscriptions, or trials. Read the privacy policy for details.
+            </Text>
+            <Button title="Read privacy policy" secondary onPress={() => setPrivacyVisible(true)} />
           <Text style={styles.label}>Account type</Text><View style={styles.row}>
             {(['customer', 'provider'] as const).map(item =>
               <Choice key={item} title={item} selected={item === role} onPress={() => setRole(item)} />)}
@@ -304,6 +339,7 @@ export default function App() {
         <Button title={mode === 'login' ? 'Sign in' : 'Create account'} onPress={() => void run(authenticate)} disabled={busy} />
         <Button title={mode === 'login' ? 'Create an account' : 'Already registered? Sign in'} secondary
           onPress={() => { setError(''); setMode(mode === 'login' ? 'register' : 'login'); }} />
+        {mode === 'login' && <Button title="Privacy policy" secondary onPress={() => setPrivacyVisible(true)} />}
       </View> : <>
         <View style={styles.row}>
           {profile.role === 'customer' && <Choice title="Discover" selected={tab === 'discover'} onPress={() => setTab('discover')} />}
@@ -352,6 +388,7 @@ export default function App() {
               })} />}
             {openReviewsOfferingId === item.id && providerReviews.map((review, index) =>
               <View key={`${review.created_at}-${index}`} style={styles.review}>
+                <Text style={styles.badge}>Verified completed booking</Text>
                 <Text style={styles.body}>{'★'.repeat(review.rating)}{'☆'.repeat(5 - review.rating)}</Text>
                 {!!review.comment && <Text style={styles.body}>{review.comment}</Text>}
                 <Text style={styles.muted}>{new Date(review.created_at).toLocaleDateString()}</Text>
@@ -390,6 +427,7 @@ export default function App() {
                 secondary disabled={busy} onPress={() => void run(() => toggleChat(item.id))} />
               {openChatBookingId === item.id && <View style={styles.chat}>
                 <Text style={styles.muted}>Messages are visible only to the customer and provider on this booking.</Text>
+                <Text style={styles.safetyNotice}>This chat is not monitored for emergencies. If you or someone else is in immediate danger, contact local emergency services or a trusted person.</Text>
                 <Button title="Refresh messages" secondary disabled={busy}
                   onPress={() => void run(() => loadChat(item.id))} />
                 {chatMessages.map(chatMessage => <View key={chatMessage.id} style={styles.message}>
@@ -420,6 +458,7 @@ export default function App() {
               <Button title="Raise a dispute" secondary disabled={busy} onPress={() => void run(() => action(item.id, 'dispute'))} />
             </>}
             {item.review && <View style={styles.review}>
+              <Text style={styles.badge}>Verified completed booking</Text>
               <Text style={styles.body}>{'★'.repeat(item.review.rating)}{'☆'.repeat(5 - item.review.rating)} · Customer review</Text>
               {!!item.review.comment && <Text style={styles.body}>{item.review.comment}</Text>}
             </View>}
@@ -464,6 +503,7 @@ export default function App() {
         {tab === 'account' && <View style={styles.card}>
           <Text style={styles.heading}>Account</Text><Text style={styles.itemTitle}>{profile.name}</Text>
           <Text style={styles.muted}>{profile.role} · {profile.phone}</Text>
+          <Button title="Privacy policy" secondary onPress={() => setPrivacyVisible(true)} />
           <View style={styles.item}>
             <Text style={styles.itemTitle}>Phone: {profile.phone_verified ? 'verified' : 'not verified'}</Text>
             {!profile.phone_verified && <>
@@ -573,9 +613,12 @@ const styles = StyleSheet.create({
   chipTextSelected: { color: '#fff', fontWeight: '700' },
   item: { borderTopWidth: 1, borderColor: '#e4eeeb', paddingTop: 16, marginTop: 16 },
   offering: { borderBottomWidth: 1, borderColor: '#e4eeeb', paddingBottom: 12 },
+  privacySummary: { color: '#294b52', lineHeight: 21, marginVertical: 10 },
+  privacySection: { borderBottomWidth: 1, borderColor: '#e4eeeb', paddingVertical: 12 },
   review: { backgroundColor: '#f5faf8', borderRadius: 10, padding: 12, marginTop: 12 },
   chat: { backgroundColor: '#f5faf8', borderRadius: 10, padding: 12, marginTop: 8 },
   message: { borderBottomWidth: 1, borderColor: '#e4eeeb', paddingVertical: 8 },
+  safetyNotice: { color: '#704b00', backgroundColor: '#fff5db', borderRadius: 8, padding: 10, lineHeight: 20, marginVertical: 8 },
   badge: { color: '#087e75', fontWeight: '700', fontSize: 12, marginTop: 5, textTransform: 'capitalize' },
   error: { color: '#8a2929', backgroundColor: '#fdecec', padding: 14, borderRadius: 10, marginBottom: 12 },
   notice: { color: '#155e54', backgroundColor: '#dbf3e8', padding: 14, borderRadius: 10, marginBottom: 12 },

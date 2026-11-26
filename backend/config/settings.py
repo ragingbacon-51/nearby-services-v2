@@ -53,8 +53,30 @@ CSRF_TRUSTED_ORIGINS = [value for value in os.environ.get(
 SESSION_COOKIE_HTTPONLY = True
 SESSION_COOKIE_SECURE = not DEBUG
 CSRF_COOKIE_SECURE = not DEBUG
-SECURE_SSL_REDIRECT = os.environ.get("SECURE_SSL_REDIRECT", "0") == "1"
+SECURE_SSL_REDIRECT = os.environ.get(
+    "SECURE_SSL_REDIRECT", "0" if DEBUG else "1"
+) == "1"
 SECURE_HSTS_SECONDS = int(os.environ.get("SECURE_HSTS_SECONDS", "0"))
+if not DEBUG and not SECURE_SSL_REDIRECT:
+    raise RuntimeError("SECURE_SSL_REDIRECT=1 is required when DEBUG is disabled.")
+if not DEBUG and SECURE_HSTS_SECONDS <= 0:
+    raise RuntimeError("SECURE_HSTS_SECONDS must be set when DEBUG is disabled.")
+if os.environ.get("TRUST_X_FORWARDED_PROTO") == "1":
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+
+REDIS_URL = os.environ.get("REDIS_URL")
+if REDIS_URL:
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.redis.RedisCache",
+            "LOCATION": REDIS_URL,
+        }
+    }
+elif DEBUG:
+    CACHES = {"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}}
+else:
+    raise RuntimeError("REDIS_URL is required when DEBUG is disabled.")
+
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
         "rest_framework.authentication.TokenAuthentication",

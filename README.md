@@ -20,6 +20,10 @@ Real M-Pesa collection and payouts, transaction fees, push/email notifications a
 
 Administrators resolve disputes from a booking's change page in Django admin. Choose **Payment due** or **Closed without payment** and enter an internal note. Both parties receive an in-app update; no payment is initiated or recorded as paid.
 
+## Privacy and safety
+
+The [privacy policy](./PRIVACY.md) and registration screen disclose the information currently handled by the prototype, including account and phone details, provider locations, booking addresses/details, messages, reviews, verification, and notifications. The policy is a draft: replace the business/contact placeholders and confirm actual retention and vendor terms before public launch. The prototype has no upload feature or public storage bucket, no subscriptions or trials, and no AI assistant. ID documents entered in Didit's hosted flow are handled by Didit, not uploaded to this app. There is no automatic data-retention or deletion process. Booking chat is not monitored for emergencies; the app is not a crisis service.
+
 ## M-Pesa sandbox checkout
 
 The app has an optional **sandbox-only** STK Push flow. It uses Safaricom's sandbox endpoint, a temporary KSh 0 additional fee and a 5% test commission. It does not collect real money, initiate B2C payouts, or mark the booking as paid. It accepts whole-shilling prices only. A single test attempt is allowed per booking; an unknown outcome requires investigation rather than an automatic retry.
@@ -64,7 +68,7 @@ To set up another machine, create a Python virtual environment, install `backend
 
 For local web development, open the app on `localhost` and use the default `http://localhost:8000/api` backend. Do not mix `localhost` and `127.0.0.1`, which browsers treat as different sites. Browser sessions use an HTTP-only cookie and CSRF protection; they expire after Django's default two weeks. Native sign-out revokes the existing shared API token, so it signs out other native devices using that token too.
 
-For a future HTTPS deployment, use frontend and API hostnames on the same site, configure `EXPO_PUBLIC_API_URL` to the HTTPS API, set `DEBUG=0`, provide a strong `DJANGO_SECRET_KEY` from a secret manager, and explicitly set `DJANGO_ALLOWED_HOSTS`, `CORS_ALLOWED_ORIGINS`, and `CSRF_TRUSTED_ORIGINS`. Configure `SECURE_SSL_REDIRECT=1` only when Django or its trusted proxy correctly detects HTTPS; set `SECURE_HSTS_SECONDS` only after HTTPS is stable for the domain. Secure cookies are enabled automatically when `DEBUG=0`. Cross-site deployments may be blocked by browser third-party cookie restrictions. These settings alone do not make the prototype production-ready.
+For a future HTTPS deployment, use frontend and API hostnames on the same site, configure `EXPO_PUBLIC_API_URL` to the HTTPS API, set `DEBUG=0`, provide a strong `DJANGO_SECRET_KEY` from a secret manager, and explicitly set `DJANGO_ALLOWED_HOSTS`, `CORS_ALLOWED_ORIGINS`, `CSRF_TRUSTED_ORIGINS`, `REDIS_URL`, and `SECURE_HSTS_SECONDS`. Non-debug startup requires HTTPS redirect, a positive HSTS duration, and Redis so throttling is shared across workers. Set `TRUST_X_FORWARDED_PROTO=1` only when a trusted reverse proxy terminates TLS and overwrites `X-Forwarded-Proto`; otherwise leave it unset. Use `rediss://` for a remote Redis service. Secure cookies are enabled automatically when `DEBUG=0`. Cross-site deployments may be blocked by browser third-party cookie restrictions. These settings alone do not make the prototype production-ready.
 
 ## Categories and reviews
 
@@ -90,7 +94,7 @@ Provider accounts and credentials are not included. Live integrations have not b
 
 ## Before launch
 
-This is not production-ready. Obtain Kenyan legal and data-protection advice; establish privacy, consent, retention, deletion and incident procedures; vet providers and safeguarding policies; and validate vendor access, costs and terms. Add secure account recovery, abuse controls, audit logs, production storage, backups, HTTPS, monitoring, secure sessions and independent security review. SQLite, the Django development server and in-memory throttling are only for local development.
+This is not production-ready. Obtain Kenyan legal and data-protection advice; establish privacy, consent, retention, deletion and incident procedures; vet providers and safeguarding policies; and validate vendor access, costs and terms. Add secure account recovery, abuse controls, audit logs, production storage, backups, monitoring, secure sessions and independent security review. SQLite, the Django development server and in-memory cache are only for local development.
 
 ## Tests
 
