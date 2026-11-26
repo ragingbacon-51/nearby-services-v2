@@ -25,6 +25,9 @@ type Booking = { id: number; customer_name: string; provider_name: string; categ
 
 const isWeb = Platform.OS === 'web';
 const API = (process.env.EXPO_PUBLIC_API_URL || `http://${isWeb ? 'localhost' : '127.0.0.1'}:8000/api`).replace(/\/$/, '');
+if (!__DEV__ && !/^https:\/\//i.test(API)) {
+  throw new Error('Production builds require EXPO_PUBLIC_API_URL to use HTTPS.');
+}
 const sessionKey = 'nearby-services-token';
 let csrfToken = '';
 const privacySections = [
@@ -38,7 +41,7 @@ const privacySections = [
   },
   {
     title: 'Storage and retention',
-    body: 'This prototype uses a local SQLite database and has no automatic retention schedule or self-service deletion. Data remains until the operator removes it. Request access, correction, or deletion at [privacy contact email]. Replace this placeholder and confirm retention before launch.',
+    body: 'Local development uses SQLite; production configuration requires PostgreSQL. The app has no automatic retention schedule or self-service deletion. Data remains until the operator removes it. Request access, correction, or deletion at [privacy contact email]. Replace this placeholder and confirm actual storage and retention before launch.',
   },
   {
     title: 'Uploads, subscriptions, and trials',

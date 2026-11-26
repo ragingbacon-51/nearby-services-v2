@@ -36,7 +36,7 @@ Information is used to create and secure accounts, verify phone numbers and prov
 
 ## Storage and security
 
-The development prototype uses a local SQLite database. A future deployment may use different hosting or storage; this policy must be updated before that happens. Native authentication tokens are stored with Expo SecureStore. Web authentication uses an HTTP-only session cookie and CSRF protection. No system can guarantee perfect security; do not use this prototype for real bookings or sensitive documents.
+Local development uses a SQLite database. Production configuration requires PostgreSQL; before deployment, update this policy to describe the actual database host, region, access, and retention. Native authentication tokens are stored with Expo SecureStore. Web authentication uses an HTTP-only session cookie and CSRF protection. No system can guarantee perfect security; do not use this prototype for real bookings or sensitive documents.
 
 ## Retention and deletion
 
