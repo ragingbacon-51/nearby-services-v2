@@ -80,7 +80,7 @@ The [privacy policy](./PRIVACY.md) and registration screen disclose the informat
 ## Development Roadmap
 
 - [ ] Real M-Pesa integration (not sandbox)
-- [ ] Push/email notifications  
+- [ ] Push/email notifications
 - [ ] Mobile app binary releases
 - [ ] Docker deployment templates
 - [ ] Transaction audit logs
