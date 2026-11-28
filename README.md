@@ -1,8 +1,59 @@
 # Nearby Services: new foundation
 
-This is a **development prototype**, rebuilt separately from the earlier Nearby Services app. The earlier prototype is untouched. The Expo app targets web, Android and iOS, backed by a Django API.
+![Status](https://img.shields.io/badge/status-development%20prototype-orange)
+![License](https://img.shields.io/badge/license-MIT-blue)
+[![GitHub](https://img.shields.io/badge/GitHub-nearby--services--v2-black?logo=github)](https://github.com/ragingbacon-51/nearby-services-v2)
 
-## What this stage includes
+A **development prototype** of a local services marketplace built with **Expo** (web, Android, iOS) and **Django**. Connect service providers with customers in your community, with phone verification, identity verification, booking management, and dispute resolution.
+
+> ⚠️ **Status**: Not production-ready. Prototype for demonstration and testing only. Do not use with real users, payments, or sensitive data until security and legal review are complete.
+
+## What This Does
+
+This is a marketplace for hyper-local services. Customers find and book providers (plumbers, cleaners, electricians, etc.) nearby, pay (via M-Pesa sandbox), message each other, and leave reviews. Administrators manage categories, approve providers, and resolve disputes.
+
+## Who It's For
+
+- Small businesses or communities wanting a local services app
+- Developers learning marketplace architecture (Expo + Django + phone verification)
+- Regions where local hiring platforms are needed (MVP for Kenya)
+
+## Quick Start
+
+### Prerequisites
+- Python 3.9+, Node.js 16+, Expo CLI
+- SQLite (included with Python)
+
+### Local Development
+
+**Backend** (Django API):
+```powershell
+cd backend
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+$env:DEBUG = "1"
+python manage.py migrate
+python manage.py createsuperuser  # Create admin account
+python manage.py runserver
+```
+
+**Frontend** (Expo app):
+```powershell
+cd mobile
+npm install
+npm run web  # or: npm start for Android/iOS via Expo Go
+```
+
+Then visit `http://localhost:19006` (web) or scan the QR code (mobile).
+
+**Admin panel**: http://localhost:8000/admin/
+
+Learn more: See [Run locally](#run-locally) below.
+
+## Features
+
+### What this stage includes
 
 - Customer and provider accounts; phone verification through eSMS and provider identity verification through Didit, once configured.
 - Administrator-managed categories: add, rename, enable and disable them without an app update. The initial categories include Barbering & Shaving and House Managers.
@@ -14,15 +65,28 @@ This is a **development prototype**, rebuilt separately from the earlier Nearby 
 - Booking, message, review and dispute updates appear in an in-app inbox; messages and inbox require manual refresh.
 - Sign-in is restored using device secure storage on Android and iOS, and an HTTP-only server session on supported web deployments.
 
-## Not built yet
+### Not built yet
 
 Real M-Pesa collection and payouts, transaction fees, push/email notifications and administrator-created provider accounts are later stages. Sandbox checkout does not collect real money or mark bookings as paid. Chat is text-only and notifications are in-app only. Do not use this prototype for real bookings. Accounts, bookings and categories from the previous prototype are not imported.
 
 Administrators resolve disputes from a booking's change page in Django admin. Choose **Payment due** or **Closed without payment** and enter an internal note. Both parties receive an in-app update; no payment is initiated or recorded as paid.
 
-## Privacy and safety
+## Security & Privacy
 
 The [privacy policy](./PRIVACY.md) and registration screen disclose the information currently handled by the prototype, including account and phone details, provider locations, booking addresses/details, messages, reviews, verification, and notifications. The policy is a draft: replace the business/contact placeholders and confirm actual retention and vendor terms before public launch. The prototype has no upload feature or public storage bucket, no subscriptions or trials, and no AI assistant. ID documents entered in Didit's hosted flow are handled by Didit, not uploaded to this app. There is no automatic data-retention or deletion process. Booking chat is not monitored for emergencies; the app is not a crisis service.
+
+**Before launching to production**, see [SECURITY.md](./SECURITY.md) for a hardening checklist and [PRIVACY.md](./PRIVACY.md) for privacy requirements.
+
+## Development Roadmap
+
+- [ ] Real M-Pesa integration (not sandbox)
+- [ ] Push/email notifications  
+- [ ] Mobile app binary releases
+- [ ] Docker deployment templates
+- [ ] Transaction audit logs
+- [ ] Provider qualification document uploads
+- [ ] Admin dashboard with analytics
+- [ ] Multi-language support (Swahili, etc.)
 
 ## M-Pesa sandbox checkout
 
